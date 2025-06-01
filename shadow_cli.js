@@ -37,7 +37,7 @@ https.get(url1, (res) => {
     const urlList = parseUrlList(urlListStr);
     serverList.push(...urlList);
     for (item of serverList) {
-      console.log(item.lineNum, ' -> ', item.info?.name);
+      console.log(item.lineNum, ' -> ', '[', item.info?.protocol, ']', item.info?.name);
     }
 
     startWaitUserInput();
@@ -81,6 +81,21 @@ function parseUrlList(str) {
 	    enc: authInfo.user,
 	    pass: authInfo.pass,
 	  };
+	} else if (url1.protocol === 'trojan:') {
+	  const props = {};
+	  url1.search.split('&').forEach(item => {
+	    const kvp = (item || '').split('=');
+	    props[kvp[0]] = kvp[1];
+	  })
+	  itemObj.info = {
+	    protocol: 'trojan',
+	    name: decodeURIComponent(url1.hash),
+	    host: url1.hostname,
+	    port: url1.port,
+	    enc: null,
+	    pass: url1.username,
+	    ...props
+	  };
 	}
 
 	console.log('->>>>', itemObj)
@@ -119,6 +134,43 @@ function startWaitUserInput() {
 	  console.log('连接命令: ', cmd);
 	  console.log('运行命令: ')
 	  execSync(cmd, {stdio: 'inherit'});
+	}
+      } else if (serverSelected?.info?.protocol === 'trojan') {
+	if (serverSelected?.info) {
+	  const serverInfo = serverSelected.info;
+	  const configObj = {
+	    run_type: 'client',
+	    local_addr: '127.0.0.1',
+            local_port: 8118,
+	    remote_addr: serverInfo.host,
+	    remote_port: serverInfo.port,
+	    password: [
+	      serverInfo.pass
+	    ],
+	    log_level: 1,
+	    ssl: {
+              verify: false,
+              verify_hostname: false,
+	      cert: '',
+	      sni: serverInfo.sni,
+              alpn: [
+		'h2',
+		'http/1.1'
+              ],
+              reuse_session: true,
+              session_ticket: false,
+              curves: ''
+	    },
+	    tcp: {
+              no_delay: true,
+              keep_alive: true,
+              reuse_port: false,
+              fast_open: false,
+              fast_open_qlen: 20
+	    }
+	  }
+	  console.log(serverInfo.name, ' 配置信息：');
+	  console.log(JSON.stringify(configObj, null, '\t'));
 	}
       }
     }
