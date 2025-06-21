@@ -1,6 +1,7 @@
 
 const https = require('node:https');
-const { Buffer } = require('node:buffer');
+// const http = require('node:http');
+const yaml = require('js-yaml');
 const readline = require('node:readline');
 const { execSync } = require('node:child_process');
 
@@ -22,7 +23,7 @@ console.log('读取URL: ', url1);
 let content = '';
 const serverList = [];
 
-https.get(url1, (res) => {
+https.get(url1, { headers: { 'user-agent': 'clash' } }, (res) => {
   console.log('statusCode:', res.statusCode);
   console.log('headers:', res.headers);
   res.on('data', (d) => {
@@ -31,14 +32,18 @@ https.get(url1, (res) => {
     //console.log('-----');
   });
   res.on('close', () => {
-    // console.log(content);
+    console.log(content);
+
+    loadServerListFromYamlStr(content);
+    showServerList();
     // console.log(decodeBase64(content));
-    const urlListStr = decodeBase64(content);
-    const urlList = parseUrlList(urlListStr);
-    serverList.push(...urlList);
-    for (item of serverList) {
-      console.log(item.lineNum, ' -> ', '[', item.info?.protocol, ']', item.info?.name);
-    }
+    
+    // const urlListStr = decodeBase64(content);
+    // const urlList = parseUrlList(urlListStr);
+    // serverList.push(...urlList);
+    // for (item of serverList) {
+    //   console.log(item.lineNum, ' -> ', '[', item.info?.protocol, ']', item.info?.name);
+    // }
 
     startWaitUserInput();
   })
@@ -46,73 +51,19 @@ https.get(url1, (res) => {
   console.error(e);
 });
 
-
-function decodeBase64(str) {
-  const buf1 = Buffer.from(str, 'base64');
-  return buf1.toString();
+function loadServerListFromYamlStr(yamlStr) {
+  const yamlObj = yaml.load(yamlStr);
+  let serverList1 = yamlObj?.proxies || [];
+  let lineNum = 0;
+  serverList1 = serverList1.map(item => ({ lineNum: ++lineNum, ...item }))
+  serverList.push(...serverList1);
+  console.log('服务器列表: ', serverList);
 }
 
-function parseUrlList(str) {
-  if ((str || '').trim().length > 0) {
-    const strList = (str || '').split("\n");
-    const list1 = [];
-    let lineNum = 0;
-    for (str of strList) {
-      console.log('正在解析: ', str);
-      let url1 = null;
-      try {
-	url1 = new URL(str);
-      } catch (err) {
-	console.error('解析出错: ', err);
-      }
-      if (url1) {
-	const itemObj = {
-	  lineNum: ++lineNum,
-	  url: url1,
-	  src: str
-	};
-	if (url1.protocol === 'ss:') {
-	  const authInfo = extractUserPassFromUrlAuthStr(url1.username);
-	  itemObj.info = {
-	    protocol: 'ss',
-	    name: decodeURIComponent(url1.hash),
-	    host: url1.hostname,
-	    port: url1.port,
-	    enc: authInfo.user,
-	    pass: authInfo.pass,
-	  };
-	} else if (url1.protocol === 'trojan:') {
-	  const props = {};
-	  url1.search.split('&').forEach(item => {
-	    const kvp = (item || '').split('=');
-	    props[kvp[0]] = kvp[1];
-	  })
-	  itemObj.info = {
-	    protocol: 'trojan',
-	    name: decodeURIComponent(url1.hash),
-	    host: url1.hostname,
-	    port: url1.port,
-	    enc: null,
-	    pass: url1.username,
-	    ...props
-	  };
-	}
-
-	console.log('->>>>', itemObj)
-	list1.push(itemObj);
-      }
-    }
-    return list1;
-  } else {
-    return [];
+function showServerList() {
+  for (item of serverList) {
+    console.log(item.lineNum, ' -> ', '[', item.type, ']', item.name);
   }
-}
-
-function extractUserPassFromUrlAuthStr(str) {
-  const buf1 = Buffer.from((str || ''), 'base64');
-  const authInfo = buf1.toString();  
-  const authInfoParts = (authInfo || '').split(':');
-  return { user: authInfoParts[0], pass: authInfoParts[1] }
 }
 
 function startWaitUserInput() {
@@ -120,32 +71,30 @@ function startWaitUserInput() {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   rl.on('line', (userInput) => {
     if (userInput === 'list') {
-      for (item of serverList) {
-	console.log(item.lineNum, ' -> ', item.info?.name);
-      }
+      showServerList();
     } else {
       const lineNum = parseInt(userInput);
       const serverSelected = serverList.find(item => (lineNum === item.lineNum));
       console.log('选中服务器: ', serverSelected);
-      if (serverSelected?.info?.protocol === 'ss') {
-	if (serverSelected?.info) {
-	  const serverInfo = serverSelected.info;
-	  const cmd = `ss-local -s ${serverInfo.host} -p ${serverInfo.port} -k ${serverInfo.pass} -m ${serverInfo.enc} -l 8118`;
+      if (serverSelected?.type === 'ss') {
+	if (serverSelected) {
+	  const serverInfo = serverSelected || {};
+	  const cmd = `ss-local -s ${serverInfo.server} -p ${serverInfo.port} -k ${serverInfo.password} -m ${serverInfo.cipher} -l 8118`;
 	  console.log('连接命令: ', cmd);
 	  console.log('运行命令: ')
 	  execSync(cmd, {stdio: 'inherit'});
 	}
-      } else if (serverSelected?.info?.protocol === 'trojan') {
-	if (serverSelected?.info) {
-	  const serverInfo = serverSelected.info;
+      } else if (serverSelected?.type === 'trojan') {
+	if (serverSelected) {
+	  const serverInfo = serverSelected;
 	  const configObj = {
 	    run_type: 'client',
 	    local_addr: '127.0.0.1',
             local_port: 8118,
-	    remote_addr: serverInfo.host,
+	    remote_addr: serverInfo.server,
 	    remote_port: serverInfo.port,
 	    password: [
-	      serverInfo.pass
+	      serverInfo.password
 	    ],
 	    log_level: 1,
 	    ssl: {
